@@ -1,11 +1,11 @@
---[[ DOORS Hub | Delta Executor | 50 funções | RightShift = abrir/fechar ]]
-if getgenv().DoorsHub then pcall(getgenv().DoorsHub) end
+--[[ Script Doors by Easy | Delta Executor | RightShift = abrir/fechar ]]
+if getgenv().EasyDoors then pcall(getgenv().EasyDoors) end
 
 local Players, RepS, Light = game:GetService("Players"), game:GetService("ReplicatedStorage"), game:GetService("Lighting")
 local UIS, RS, TS, TPS = game:GetService("UserInputService"), game:GetService("RunService"), game:GetService("TweenService"), game:GetService("TeleportService")
 local WS, lp = workspace, Players.LocalPlayer
 
-local conns, S, V, feats, alive, unload = {}, {}, {}, {}, true, nil
+local conns, S, V, feats, byName, alive, unload = {}, {}, {}, {}, {}, true, nil
 local lastDt = 1 / 60
 
 local function conn(sig, fn) local c = sig:Connect(fn) conns[#conns + 1] = c return c end
@@ -22,7 +22,7 @@ local ACC, BG, BG2, OFF, TXT = Color3.fromRGB(120, 95, 255), Color3.fromRGB(16, 
 local RED, GRN, YEL, BLU = Color3.fromRGB(255, 85, 85), Color3.fromRGB(80, 230, 120), Color3.fromRGB(255, 205, 70), Color3.fromRGB(90, 170, 255)
 
 local okH, root = pcall(function() return gethui() end)
-local gui = new("ScreenGui", {Name = "DoorsHub", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999}, okH and root or game:GetService("CoreGui"))
+local gui = new("ScreenGui", {Name = "ScriptDoorsByEasy", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999}, okH and root or game:GetService("CoreGui"))
 local ESPF = new("Folder", {Name = "ESP"}, gui)
 
 -- ===== notificações =====
@@ -42,15 +42,16 @@ local function hum() local c = lp.Character return c and c:FindFirstChildOfClass
 local function partOf(o) return o:IsA("BasePart") and o or (o:IsA("Model") and o.PrimaryPart) or o:FindFirstChildWhichIsA("BasePart", true) end
 local function near(o, r) local p, h = partOf(o), hrp() return p and h and (p.Position - h.Position).Magnitude <= r end
 local function rooms() return WS:FindFirstChild("CurrentRooms") end
-local function curRoom()
+local function latest()
 	local gd = RepS:FindFirstChild("GameData")
-	local lr, rs = gd and gd:FindFirstChild("LatestRoom"), rooms()
-	return lr and rs and rs:FindFirstChild(tostring(lr.Value))
+	local lr = gd and gd:FindFirstChild("LatestRoom")
+	return lr and lr.Value or 0
 end
+local function curRoom() local rs = rooms() return rs and rs:FindFirstChild(tostring(latest())) end
 local function curDoor() local r = curRoom() return r and r:FindFirstChild("Door") end
 local function remotes() return RepS:FindFirstChild("RemotesFolder") end
 
--- cache de objetos por nome (atualizado só quando alguma função precisa)
+-- cache de objetos por nome (só atualiza quando alguma função precisa)
 local C = {}
 local function scan()
 	local t, rs = {}, rooms()
@@ -67,83 +68,129 @@ local function scan()
 	C = t
 end
 
--- ===== ESP =====
-local esp = setmetatable({}, {__index = function(t, k) local n = {} rawset(t, k, n) return n end})
-local function clear(cat) for _, e in pairs(esp[cat]) do e.b:Destroy() e.g:Destroy() end esp[cat] = {} end
-local function prune(cat)
-	for o, e in pairs(esp[cat]) do
-		if not o:IsDescendantOf(WS) then e.b:Destroy() e.g:Destroy() esp[cat][o] = nil end
-	end
-end
-local function mark(cat, o, col, txt)
-	local e = esp[cat][o]
-	if e then if e.l.Text ~= txt then e.l.Text = txt end return end
-	local p = partOf(o)
-	if not p then return end
-	local sz = o:IsA("Model") and o:GetExtentsSize() or p.Size
-	local b = new("BoxHandleAdornment", {Adornee = p, AlwaysOnTop = true, ZIndex = 2, Size = sz, Color3 = col, Transparency = .6}, ESPF)
-	local g = new("BillboardGui", {Adornee = p, AlwaysOnTop = true, Size = UDim2.fromOffset(150, 16), StudsOffset = Vector3.new(0, 2, 0)}, ESPF)
-	local l = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = txt, TextColor3 = col, TextStrokeTransparency = 0, Font = Enum.Font.GothamBold, TextSize = 12}, g)
-	esp[cat][o] = {b = b, g = g, l = l}
-end
-
 local function feat(cat, name, o)
 	o.cat, o.name, o.acc = cat, name, 0
 	if o.slider then V[name] = o.slider[3] end
 	feats[#feats + 1] = o
+	byName[name] = o
 end
+local function setF(f, v)
+	S[f.name] = v
+	if f.ui then f.ui(v) end
+	if f.on then pcall(f.on, v) end
+end
+
+-- ===== ESP (Highlight = formato real do objeto) =====
+local esp = setmetatable({}, {__index = function(t, k) local n = {} rawset(t, k, n) return n end})
+local function destroyE(e) e.h:Destroy() e.g:Destroy() end
+local function clear(cat) for _, e in pairs(esp[cat]) do destroyE(e) end esp[cat] = {} end
+local function begin(cat) for _, e in pairs(esp[cat]) do e.seen = false end end
+local function finish(cat)
+	for o, e in pairs(esp[cat]) do
+		if not e.seen or not o:IsDescendantOf(WS) then destroyE(e) esp[cat][o] = nil end
+	end
+end
+local function mark(cat, o, col, txt)
+	local e = esp[cat][o]
+	if e then
+		e.seen = true
+		if e.l.Text ~= txt then e.l.Text = txt end
+		return
+	end
+	local p = partOf(o)
+	if not p then return end
+	local h = new("Highlight", {Adornee = o, FillColor = col, OutlineColor = col, FillTransparency = .55, OutlineTransparency = 0, DepthMode = Enum.HighlightDepthMode.AlwaysOnTop}, ESPF)
+	local g = new("BillboardGui", {Adornee = p, AlwaysOnTop = true, Size = UDim2.fromOffset(150, 16), StudsOffset = Vector3.new(0, 2, 0)}, ESPF)
+	local l = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = txt, TextColor3 = col, TextStrokeTransparency = 0, Font = Enum.Font.GothamBold, TextSize = 12}, g)
+	esp[cat][o] = {h = h, g = g, l = l, p = p, seen = true}
+end
+-- o Roblox só renderiza ~31 Highlights: os mais próximos ficam com contorno, os distantes só com o nome
+task.spawn(function()
+	while alive do
+		local all, hp = {}, hrp()
+		if hp then
+			for _, cat in pairs(esp) do
+				for _, e in pairs(cat) do all[#all + 1] = {e = e, d = (e.p.Position - hp.Position).Magnitude} end
+			end
+			table.sort(all, function(a, b) return a.d < b.d end)
+			for i, x in ipairs(all) do x.e.h.Enabled = i <= 30 end
+		end
+		task.wait(.4)
+	end
+end)
 
 local function espf(name, cat, col, names, lab)
 	feat("ESP", name, {scan = true, rate = 1.2,
 		on = function(v) if not v then clear(cat) end end,
 		step = function()
+			begin(cat)
 			for _, n in ipairs(names) do
 				for _, o in ipairs(C[n] or {}) do mark(cat, o, col, lab and lab(o, n) or n) end
 			end
-			prune(cat)
+			finish(cat)
 		end})
 end
 
 local ENT = {RushMoving = "Rush", AmbushMoving = "Ambush", A60 = "A-60", A120 = "A-120", Eyes = "Eyes", JeffTheKiller = "Jeff",
-	BackdoorRush = "Haste", BackdoorLookman = "Lookman", SeekMovingNewClone = "Seek", GloombatSwarm = "Gloombats"}
+	BackdoorRush = "Haste", BackdoorLookman = "Lookman", SeekMoving = "Seek", SeekMovingNewClone = "Seek", GloombatSwarm = "Gloombats"}
+local ROOMENT = {FigureRig = "Figure", FigureRagdoll = "Figure", GiggleCeiling = "Giggle", GrumbleRig = "Grumble"}
 local ITEMS = {"Lighter", "Flashlight", "Lockpicks", "Vitamins", "Bandage", "Battery", "BatteryPack", "Crucifix", "Candle", "Smoothie", "Compass", "Shakelight", "Straplight", "Bulklight", "Glowstick"}
 
--- ===== 1) ESP (10) =====
-feat("ESP", "ESP Portas", {scan = true, rate = 1.2,
+-- ===== 1) ESP =====
+feat("ESP", "ESP Portas", {scan = true, rate = 1,
 	on = function(v) if not v then clear("door") end end,
 	step = function()
-		local rs = rooms()
+		local rs, lr = rooms(), latest()
+		begin("door")
 		for _, o in ipairs(C.Door or {}) do
 			if o:IsA("Model") and o.Parent.Parent == rs then
-				mark("door", o, YEL, "Porta " .. o.Parent.Name .. (o:FindFirstChild("Lock") and " [TRANCADA]" or ""))
+				local n = tonumber(o.Parent.Name)
+				if n and n >= lr then -- portas já atravessadas somem
+					mark("door", o, YEL, "Porta " .. n .. (o:FindFirstChild("Lock") and " [TRANCADA]" or ""))
+				end
 			end
 		end
-		prune("door")
+		finish("door")
 	end})
 espf("ESP Armários", "lock", BLU, {"Wardrobe", "Rooms_Locker", "Rooms_Locker_Fridge"}, function() return "Armário" end)
 espf("ESP Moedas", "gold", YEL, {"GoldPile"}, function(o) return "Ouro " .. tostring(o:GetAttribute("GoldValue") or "") end)
 espf("ESP Chaves", "key", GRN, {"KeyObtain"}, function() return "CHAVE" end)
 espf("ESP Alavancas", "lever", GRN, {"LeverForGate"}, function() return "Alavanca" end)
-espf("ESP Livros e Disjuntores", "book", Color3.fromRGB(200, 140, 255), {"LiveHintBook", "LiveBreakerPolePickup"}, function(o, n) return n == "LiveHintBook" and "Livro" or "Disjuntor" end)
+espf("ESP Livros", "book", Color3.fromRGB(200, 140, 255), {"LiveHintBook"}, function() return "Livro" end)
+espf("ESP Disjuntores", "breaker", Color3.fromRGB(120, 220, 255), {"LiveBreakerPolePickup"}, function() return "Disjuntor" end)
 espf("ESP Itens", "item", Color3.fromRGB(255, 160, 80), ITEMS)
-espf("ESP Gavetas e Baús", "chest", Color3.fromRGB(180, 180, 200), {"DrawerContainer", "ChestBoxLocked", "Toolbox"}, function(o, n) return n == "DrawerContainer" and "Gaveta" or "Baú" end)
-feat("ESP", "ESP Entidades", {rate = .3,
+espf("ESP Gavetas", "drawer", Color3.fromRGB(190, 190, 210), {"DrawerContainer"}, function() return "Gaveta" end)
+espf("ESP Baús", "chest", Color3.fromRGB(255, 190, 120), {"ChestBox", "ChestBoxLocked", "Toolbox"}, function() return "Baú" end)
+feat("ESP", "ESP Entidades", {scan = true, rate = .3,
 	on = function(v) if not v then clear("ent") end end,
 	step = function()
-		for _, c in ipairs(WS:GetChildren()) do if ENT[c.Name] then mark("ent", c, RED, ENT[c.Name]) end end
-		prune("ent")
+		begin("ent")
+		for _, c in ipairs(WS:GetChildren()) do
+			local n = ENT[c.Name] or (c:IsA("Model") and c.Name:find("Moving$") and c.Name)
+			if n then mark("ent", c, RED, n) end
+		end
+		local cm = WS.CurrentCamera
+		local sc = cm and cm:FindFirstChild("Screech")
+		if sc then mark("ent", sc, RED, "Screech") end
+		for n, lab in pairs(ROOMENT) do
+			for _, o in ipairs(C[n] or {}) do mark("ent", o, RED, lab) end
+		end
+		finish("ent")
 	end})
 feat("ESP", "ESP Jogadores", {rate = .5,
 	on = function(v) if not v then clear("ply") end end,
 	step = function()
+		begin("ply")
 		for _, p in ipairs(Players:GetPlayers()) do if p ~= lp and p.Character then mark("ply", p.Character, GRN, p.Name) end end
-		prune("ply")
+		finish("ply")
 	end})
 
--- ===== 2) Entidades (8) =====
+-- ===== 2) Entidades =====
 feat("Entidades", "Notificar Entidades", {})
 conn(WS.ChildAdded, function(c)
-	if S["Notificar Entidades"] and ENT[c.Name] then notify(ENT[c.Name] .. " apareceu!", RED) end
+	if not S["Notificar Entidades"] then return end
+	local n = ENT[c.Name] or (c:IsA("Model") and c.Name:find("Moving$") and c.Name)
+	if n then notify(n .. " apareceu!", RED) end
 end)
 feat("Entidades", "Alerta Porta Trancada", {})
 task.spawn(function()
@@ -169,20 +216,20 @@ feat("Entidades", "Anti-Eyes", {rate = .1, step = function()
 	local rf = remotes()
 	if WS:FindFirstChild("Eyes") and rf and rf:FindFirstChild("MotorReplication") then rf.MotorReplication:FireServer(-649) end -- olhar pro chão
 end})
-local function killer(name, cat, names, rate)
-	feat("Entidades", name, {scan = true, rate = rate or 1, step = function()
+local function killer(name, names)
+	feat("Entidades", name, {scan = true, rate = 1, step = function()
 		for _, n in ipairs(names) do for _, o in ipairs(C[n] or {}) do pcall(o.Destroy, o) end end
 	end})
 end
-killer("Anti-Seek (Obstáculos)", nil, {"Seek_Arm", "ChandelierObstruction"})
-killer("Anti-Snare", nil, {"Snare"})
-killer("Anti-Giggle", nil, {"GiggleCeiling"})
+killer("Anti-Seek (Obstáculos)", {"Seek_Arm", "ChandelierObstruction"})
+killer("Anti-Snare", {"Snare"})
+killer("Anti-Giggle", {"GiggleCeiling"})
 feat("Entidades", "Anti-Lookman", {rate = .5, step = function()
 	local l = WS:FindFirstChild("BackdoorLookman")
 	if l then l:Destroy() end
 end})
 
--- ===== 3) Movimento (6) =====
+-- ===== 3) Movimento =====
 local orig = {}
 feat("Movimento", "Velocidade", {slider = {16, 60, 24}, on = function(v) local h = hum() if h and not v then h.WalkSpeed = 15 end end,
 	step = function() local h = hum() if h then h.WalkSpeed = V["Velocidade"] end end})
@@ -213,7 +260,7 @@ feat("Movimento", "Voar", {slider = {20, 80, 40},
 		fv.Velocity = hm.MoveDirection * sp + Vector3.new(0, up, 0)
 	end})
 
--- ===== 4) Interação (9) =====
+-- ===== 4) Interação =====
 local function openDoor(d)
 	local r = d:FindFirstChild("ClientOpen")
 	if r then if r:IsA("RemoteFunction") then r:InvokeServer() else r:FireServer() end end
@@ -261,10 +308,10 @@ auto("Auto Itens", ITEMS)
 auto("Auto Chave", {"KeyObtain"})
 auto("Auto Alavanca", {"LeverForGate"})
 auto("Auto Livros/Disjuntores", {"LiveHintBook", "LiveBreakerPolePickup"})
-auto("Auto Gavetas", {"DrawerContainer", "ChestBoxLocked", "Toolbox"})
+auto("Auto Gavetas", {"DrawerContainer", "ChestBox", "ChestBoxLocked", "Toolbox"})
 
--- ===== 5) Visual (8) =====
-local LO, EF, FG = nil, {}, nil
+-- ===== 5) Visual =====
+local LO, FG
 feat("Visual", "Fullbright", {rate = .3,
 	on = function(v)
 		if v then LO = {Light.Brightness, Light.Ambient, Light.OutdoorAmbient, Light.GlobalShadows}
@@ -274,18 +321,27 @@ feat("Visual", "Fullbright", {rate = .3,
 feat("Visual", "Sem Neblina", {rate = .3,
 	on = function(v)
 		if v then FG = {Light.FogStart, Light.FogEnd} elseif FG then Light.FogStart, Light.FogEnd = FG[1], FG[2] end
-		for _, a in ipairs(Light:GetChildren()) do if a:IsA("Atmosphere") then if v then a:SetAttribute("dn", a.Density) a.Density = 0 else a.Density = a:GetAttribute("dn") or a.Density end end end
+		for _, a in ipairs(Light:GetChildren()) do
+			if a:IsA("Atmosphere") then
+				if v then a:SetAttribute("dn", a.Density) a.Density = 0 else a.Density = a:GetAttribute("dn") or a.Density end
+			end
+		end
 	end,
 	step = function() Light.FogStart = 9e8 Light.FogEnd = 9e9 end})
-feat("Visual", "Remover Efeitos", {rate = .5,
-	on = function(v) if not v then for e, s in pairs(EF) do if e.Parent then e.Enabled = s end end EF = {} end end,
-	step = function()
-		for _, e in ipairs(Light:GetChildren()) do
-			if e:IsA("PostEffect") then if EF[e] == nil then EF[e] = e.Enabled end e.Enabled = false end
+-- FOV roda no RenderStepped com prioridade máxima: o jogo mexe no FOV da câmera todo frame, então precisa vir depois dele
+feat("Visual", "FOV", {slider = {70, 120, 90},
+	on = function(v)
+		pcall(function() RS:UnbindFromRenderStep("EasyFOV") end)
+		if v then
+			RS:BindToRenderStep("EasyFOV", Enum.RenderPriority.Last.Value, function()
+				local c = WS.CurrentCamera
+				if c then c.FieldOfView = V["FOV"] end
+			end)
+		else
+			local c = WS.CurrentCamera
+			if c then c.FieldOfView = 70 end
 		end
 	end})
-feat("Visual", "FOV", {slider = {70, 120, 90}, on = function(v) if not v then WS.CurrentCamera.FieldOfView = 70 end end,
-	step = function() WS.CurrentCamera.FieldOfView = V["FOV"] end})
 feat("Visual", "Terceira Pessoa", {slider = {5, 30, 12},
 	on = function(v) if not v then lp.CameraMode = Enum.CameraMode.LockFirstPerson lp.CameraMaxZoomDistance = .5 end end,
 	step = function() lp.CameraMode = Enum.CameraMode.Classic lp.CameraMaxZoomDistance = V["Terceira Pessoa"] end})
@@ -293,16 +349,84 @@ local fpsL = new("TextLabel", {Size = UDim2.fromOffset(120, 18), Position = UDim
 local roomL = new("TextLabel", {Size = UDim2.fromOffset(220, 18), Position = UDim2.new(.5, -110, 0, 22), BackgroundTransparency = 1, TextColor3 = YEL, Font = Enum.Font.GothamBold, TextSize = 13, TextStrokeTransparency = .5, Visible = false, Text = ""}, gui)
 feat("Visual", "Contador de FPS", {rate = .5, on = function(v) fpsL.Visible = v end, step = function() fpsL.Text = "FPS " .. math.floor(1 / lastDt) end})
 feat("Visual", "Contador de Sala", {rate = .5, on = function(v) roomL.Visible = v end, step = function()
-	local gd = RepS:FindFirstChild("GameData")
-	local lr, d = gd and gd:FindFirstChild("LatestRoom"), curDoor()
-	roomL.Text = "Sala " .. (lr and lr.Value or "?") .. " | Porta: " .. (d and (d:FindFirstChild("Lock") and "trancada" or "livre") or "?")
-end})
-feat("Visual", "Anti-Lag", {on = function(v)
-	pcall(function() settings().Rendering.QualityLevel = v and Enum.QualityLevel.Level01 or Enum.QualityLevel.Automatic end)
-	Light.GlobalShadows = not v
+	local d = curDoor()
+	roomL.Text = "Sala " .. latest() .. " | Porta: " .. (d and (d:FindFirstChild("Lock") and "trancada" or "livre") or "?")
 end})
 
--- ===== 6) Utilidades (9) =====
+-- ===== 6) Otimização =====
+-- opt: aplica em tudo que já existe + em tudo que nascer; ao desligar restaura o valor original
+local function opt(name, test, apply, undo, extra)
+	local saved, hook = setmetatable({}, {__mode = "k"}), nil
+	feat("Otimização", name, {on = function(v)
+		if hook then hook:Disconnect() hook = nil end
+		if extra then pcall(extra, v) end
+		if v then
+			for _, d in ipairs(WS:GetDescendants()) do
+				if saved[d] == nil and test(d) then saved[d] = apply(d) end
+			end
+			hook = WS.DescendantAdded:Connect(function(d)
+				if saved[d] == nil and test(d) then saved[d] = apply(d) end
+			end)
+		else
+			for d, old in pairs(saved) do pcall(undo, d, old) saved[d] = nil end
+		end
+	end})
+end
+opt("Remover Texturas",
+	function(d) return d:IsA("Decal") or d:IsA("Texture") end,
+	function(d) local t = d.Transparency d.Transparency = 1 return t end,
+	function(d, old) d.Transparency = old end)
+opt("Materiais Simples",
+	function(d) return d:IsA("BasePart") and not d:IsA("Terrain") end,
+	function(d) local m, r = d.Material, d.Reflectance d.Material = Enum.Material.SmoothPlastic d.Reflectance = 0 return {m, r} end,
+	function(d, old) d.Material, d.Reflectance = old[1], old[2] end)
+opt("Remover Partículas",
+	function(d) return d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") end,
+	function(d) local e = d.Enabled d.Enabled = false return e end,
+	function(d, old) d.Enabled = old end)
+opt("Remover Sombras",
+	function(d) return d:IsA("BasePart") end,
+	function(d) local c = d.CastShadow d.CastShadow = false return c end,
+	function(d, old) d.CastShadow = old end,
+	function(v) Light.GlobalShadows = not v end)
+opt("Luzes sem Sombra",
+	function(d) return d:IsA("PointLight") or d:IsA("SpotLight") or d:IsA("SurfaceLight") end,
+	function(d) local s = d.Shadows d.Shadows = false return s end,
+	function(d, old) d.Shadows = old end)
+feat("Otimização", "Parar Animações", {rate = .6, step = function()
+	local rs = rooms()
+	if not rs then return end
+	for _, a in ipairs(rs:GetDescendants()) do
+		if a:IsA("Animator") then
+			for _, t in ipairs(a:GetPlayingAnimationTracks()) do t:Stop(0) end
+		end
+	end
+end})
+local EF = {}
+feat("Otimização", "Remover Efeitos de Tela", {rate = .5,
+	on = function(v) if not v then for e, s in pairs(EF) do if e.Parent then e.Enabled = s end end EF = {} end end,
+	step = function()
+		for _, e in ipairs(Light:GetChildren()) do
+			if e:IsA("PostEffect") then if EF[e] == nil then EF[e] = e.Enabled end e.Enabled = false end
+		end
+	end})
+feat("Otimização", "Gráficos Mínimos", {on = function(v)
+	pcall(function() settings().Rendering.QualityLevel = v and Enum.QualityLevel.Level01 or Enum.QualityLevel.Automatic end)
+end})
+feat("Otimização", "Desbloquear FPS", {on = function(v) if setfpscap then pcall(setfpscap, v and 240 or 60) end end})
+feat("Otimização", "Limpar Memória", {btn = function()
+	local a = collectgarbage("count")
+	collectgarbage("collect")
+	notify(string.format("Liberado %.1f MB", math.max(0, (a - collectgarbage("count")) / 1024)), GRN)
+end})
+feat("Otimização", "Modo FPS Máximo", {btn = function()
+	for _, n in ipairs({"Remover Texturas", "Materiais Simples", "Remover Partículas", "Remover Sombras", "Luzes sem Sombra", "Parar Animações", "Remover Efeitos de Tela", "Gráficos Mínimos", "Desbloquear FPS"}) do
+		if byName[n] and not S[n] then setF(byName[n], true) end
+	end
+	notify("Modo FPS Máximo ativado", GRN)
+end})
+
+-- ===== 7) Utilidades =====
 local afk
 feat("Utilidades", "Anti-AFK", {on = function(v)
 	if afk then afk:Disconnect() afk = nil end
@@ -359,21 +483,15 @@ end)
 task.spawn(function()
 	while alive do
 		for _, f in ipairs(feats) do if f.scan and S[f.name] then pcall(scan) break end end
-		task.wait(2.5)
+		task.wait(2)
 	end
 end)
 
 -- ===== interface =====
-local function setF(f, v)
-	S[f.name] = v
-	if f.ui then f.ui(v) end
-	if f.on then pcall(f.on, v) end
-end
-
 local main = new("Frame", {Size = UDim2.fromOffset(310, 420), Position = UDim2.fromOffset(30, 60), BackgroundColor3 = BG, ClipsDescendants = true}, gui)
 corner(main, 10); new("UIStroke", {Color = ACC, Thickness = 1.5}, main)
 local bar = new("Frame", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = BG2}, main)
-new("TextLabel", {Size = UDim2.new(1, -50, 1, 0), Position = UDim2.fromOffset(12, 0), BackgroundTransparency = 1, Text = "DOORS HUB  ·  50 funções", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, bar)
+new("TextLabel", {Size = UDim2.new(1, -50, 1, 0), Position = UDim2.fromOffset(12, 0), BackgroundTransparency = 1, Text = "Script Doors by Easy  ·  " .. #feats .. " funções", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, bar)
 local min = new("TextButton", {Size = UDim2.fromOffset(28, 24), Position = UDim2.new(1, -36, 0, 6), BackgroundColor3 = OFF, Text = "–", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 16}, bar)
 corner(min, 6)
 
@@ -440,7 +558,7 @@ local function build(f, par)
 	end
 end
 
-for idx, cn in ipairs({"ESP", "Entidades", "Movimento", "Interação", "Visual", "Utilidades"}) do
+for idx, cn in ipairs({"ESP", "Entidades", "Movimento", "Interação", "Visual", "Otimização", "Utilidades"}) do
 	local group, n = {}, 0
 	for _, f in ipairs(feats) do if f.cat == cn then group[#group + 1] = f n += 1 end end
 	local box = new("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = BG2, LayoutOrder = idx}, list)
@@ -457,7 +575,7 @@ for idx, cn in ipairs({"ESP", "Entidades", "Movimento", "Interação", "Visual",
 	end)
 end
 
-local fab = new("TextButton", {Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(8, 110), BackgroundColor3 = ACC, Text = "D", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 18}, gui)
+local fab = new("TextButton", {Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(8, 110), BackgroundColor3 = ACC, Text = "E", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 18}, gui)
 corner(fab, 19)
 local function toggleUI() main.Visible = not main.Visible end
 fab.MouseButton1Click:Connect(toggleUI)
@@ -471,9 +589,10 @@ unload = function()
 		S[f.name] = false
 	end
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+	pcall(function() RS:UnbindFromRenderStep("EasyFOV") end)
 	gui:Destroy()
-	getgenv().DoorsHub = nil
+	getgenv().EasyDoors = nil
 end
-getgenv().DoorsHub = unload
+getgenv().EasyDoors = unload
 
-notify("DOORS Hub carregado", GRN)
+notify("Script Doors by Easy carregado", GRN)
